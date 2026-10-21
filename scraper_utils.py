@@ -1,3 +1,4 @@
+import os
 from urllib.parse import urljoin
 from urllib.parse import urlparse
 
@@ -106,10 +107,27 @@ def pagination_data(soup, current_page: int) -> dict:
     }
 
 
+import urllib.parse
+from bs4 import BeautifulSoup
+
 def fetch_soup(url: str, referer: str | None = None):
-    headers = {**HEADERS, "Referer": referer or BASE_URL}
-    response = HTTP_SESSION.get(url, headers=headers, timeout=(10, 30))
+    scraper_api_key = os.getenv("SCRAPER_API_KEY")
+    if not scraper_api_key:
+        raise RuntimeError(
+            "SCRAPER_API_KEY environment variable is not configured"
+        )
+    
+    # Encode the target URL so it can be passed as a parameter safely
+    encoded_url = urllib.parse.quote(url)
+    
+    # The proxy URL routes your request through residential IPs
+    proxy_url = (
+        f"http://api.scraperapi.com?api_key={scraper_api_key}"
+        f"&url={encoded_url}"
+    )
+    
+    # You can now just use standard requests, the proxy handles the headers and Cloudflare
+    response = HTTP_SESSION.get(proxy_url, timeout=(15, 45)) 
     response.raise_for_status()
-    from bs4 import BeautifulSoup
 
     return BeautifulSoup(response.text, "html.parser")

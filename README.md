@@ -24,6 +24,15 @@ pip install -r requirements.txt
 
 ## Start the API
 
+Set the ScraperAPI key in the environment before starting the API:
+
+```powershell
+$env:SCRAPER_API_KEY = "your-scraperapi-key"
+```
+
+Do not commit the key to the repository. If a key was previously committed or
+shared publicly, revoke it in ScraperAPI and create a replacement.
+
 ```powershell
 python -m uvicorn api:app --host 127.0.0.1 --port 8000 --reload
 ```
