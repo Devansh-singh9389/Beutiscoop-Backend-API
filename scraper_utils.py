@@ -49,6 +49,12 @@ def create_http_session():
 
 HTTP_SESSION = create_http_session()
 load_dotenv()
+_use_scraper_api = False
+
+
+def set_scraper_api_enabled(enabled: bool) -> None:
+    global _use_scraper_api
+    _use_scraper_api = enabled
 
 
 def absolute_url(value: str | None) -> str | None:
@@ -134,9 +140,10 @@ def fetch_response(
     data: dict | None = None,
     headers: dict | None = None,
 ) -> requests.Response:
+    request_url = _scraper_api_url(url) if _use_scraper_api else url
     response = HTTP_SESSION.request(
         method,
-        _scraper_api_url(url),
+        request_url,
         data=data,
         headers=headers,
         timeout=(15, 45),

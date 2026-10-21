@@ -24,11 +24,17 @@ pip install -r requirements.txt
 
 ## Start the API
 
-Set the ScraperAPI key in the environment before starting the API:
+Direct upstream requests are used by default. To route requests through
+ScraperAPI, enable it in the environment and provide the API key:
 
 ```powershell
+$env:USE_SCRAPER_API = "true"
 $env:SCRAPER_API_KEY = "your-scraperapi-key"
 ```
+
+Set `USE_SCRAPER_API` to `false`, `0`, `no`, or `off` to bypass ScraperAPI.
+When it is unset, ScraperAPI is disabled. `SCRAPER_API_KEY` is required only
+when ScraperAPI is enabled.
 
 Do not commit the key to the repository. If a key was previously committed or
 shared publicly, revoke it in ScraperAPI and create a replacement.

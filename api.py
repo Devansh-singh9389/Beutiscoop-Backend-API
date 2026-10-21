@@ -1,3 +1,5 @@
+import os
+
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from requests import HTTPError, RequestException, Timeout
@@ -9,6 +11,7 @@ from movie import get_movie_data
 from search import search_anime
 from series import get_series_data
 from series_ep import get_episode_data
+from scraper_utils import set_scraper_api_enabled
 
 
 app = FastAPI(title="Beutiscoop API", version="1.0.0")
@@ -20,6 +23,25 @@ app.add_middleware(
     allow_methods=["GET"],
     allow_headers=["*"],
 )
+
+
+def _read_bool_env(name: str, default: bool = False) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+
+    normalized = value.strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    raise RuntimeError(
+        f"{name} must be one of: true, false, 1, 0, yes, no, on, off"
+    )
+
+
+use_ScraperAPI = _read_bool_env("USE_SCRAPER_API")
+set_scraper_api_enabled(use_ScraperAPI)
 
 
 def run_scraper(scraper, *args):
