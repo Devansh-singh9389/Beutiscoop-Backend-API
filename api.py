@@ -46,6 +46,9 @@ def run_scraper(scraper, *args):
     except RequestException as exc:
         logger.warning("Upstream connection error in %s: %s", scraper.__name__, exc)
         raise HTTPException(status_code=502, detail="Upstream content is unavailable") from exc
+    except RuntimeError as exc:
+        logger.error("Scraper configuration error in %s: %s", scraper.__name__, exc)
+        raise HTTPException(status_code=503, detail="The content provider is not configured") from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

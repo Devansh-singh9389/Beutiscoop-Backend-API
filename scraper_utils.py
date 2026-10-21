@@ -2,9 +2,11 @@ import os
 from urllib.parse import urljoin
 from urllib.parse import urlparse
 
+import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 import cloudscraper
+from dotenv import load_dotenv
 
 
 BASE_URL = "https://watchanimeworld.one"
@@ -46,6 +48,7 @@ def create_http_session():
 
 
 HTTP_SESSION = create_http_session()
+load_dotenv()
 
 
 def absolute_url(value: str | None) -> str | None:
@@ -110,24 +113,41 @@ def pagination_data(soup, current_page: int) -> dict:
 import urllib.parse
 from bs4 import BeautifulSoup
 
-def fetch_soup(url: str, referer: str | None = None):
+def _scraper_api_url(url: str) -> str:
     scraper_api_key = os.getenv("SCRAPER_API_KEY")
     if not scraper_api_key:
         raise RuntimeError(
             "SCRAPER_API_KEY environment variable is not configured"
         )
-    
-    # Encode the target URL so it can be passed as a parameter safely
+
     encoded_url = urllib.parse.quote(url)
-    
-    # The proxy URL routes your request through residential IPs
-    proxy_url = (
+    return (
         f"http://api.scraperapi.com?api_key={scraper_api_key}"
         f"&url={encoded_url}"
     )
-    
-    # You can now just use standard requests, the proxy handles the headers and Cloudflare
-    response = HTTP_SESSION.get(proxy_url, timeout=(15, 45)) 
-    response.raise_for_status()
 
+
+def fetch_response(
+    url: str,
+    *,
+    method: str = "GET",
+    data: dict | None = None,
+    headers: dict | None = None,
+) -> requests.Response:
+    response = HTTP_SESSION.request(
+        method,
+        _scraper_api_url(url),
+        data=data,
+        headers=headers,
+        timeout=(15, 45),
+    )
+    response.raise_for_status()
+    return response
+
+
+def fetch_soup(url: str, referer: str | None = None):
+    response = fetch_response(
+        url,
+        headers={"Referer": referer} if referer else None,
+    )
     return BeautifulSoup(response.text, "html.parser")

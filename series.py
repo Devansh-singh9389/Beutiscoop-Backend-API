@@ -1,6 +1,6 @@
 import re
 
-from scraper_utils import absolute_url, fetch_soup, BASE_URL, HEADERS, HTTP_SESSION
+from scraper_utils import absolute_url, fetch_response, fetch_soup, BASE_URL, HEADERS
 
 
 def _episodes(element):
@@ -37,13 +37,12 @@ def get_series_data(slug: str):
         number = button.get("data-season")
         episodes = _episodes(active) if number == active_num else []
         if not episodes and nonce and post_id:
-            response = HTTP_SESSION.post(
+            response = fetch_response(
                 f"{BASE_URL}/wp-admin/admin-ajax.php",
+                method="POST",
                 data={"action": "action_select_season", "season": number, "post": post_id, "nonce": nonce},
                 headers={**HEADERS, "Referer": series_url, "X-Requested-With": "XMLHttpRequest"},
-                timeout=(10, 30),
             )
-            response.raise_for_status()
             from bs4 import BeautifulSoup
             episodes = _episodes(BeautifulSoup(response.text, "html.parser"))
         seasons.append({"season_name": button.get_text(strip=True), "season_number": int(number), "episodes": episodes, "episodes_count": len(episodes)})
