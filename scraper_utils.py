@@ -1,9 +1,9 @@
 from urllib.parse import urljoin
 from urllib.parse import urlparse
 
-import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
+import cloudscraper
 
 
 BASE_URL = "https://watchanimeworld.one"
@@ -16,7 +16,7 @@ HEADERS = {
 }
 
 
-def create_http_session() -> requests.Session:
+def create_http_session():
     retry = Retry(
         total=2,
         connect=2,
@@ -27,7 +27,16 @@ def create_http_session() -> requests.Session:
         allowed_methods=frozenset({"GET", "POST"}),
         raise_on_status=False,
     )
-    session = requests.Session()
+    
+    # Initialize cloudscraper instead of standard requests.Session
+    session = cloudscraper.create_scraper(
+        browser={
+            'browser': 'chrome',
+            'platform': 'windows',
+            'desktop': True
+        }
+    )
+    
     session.headers.update(HEADERS)
     adapter = HTTPAdapter(max_retries=retry)
     session.mount("https://", adapter)
