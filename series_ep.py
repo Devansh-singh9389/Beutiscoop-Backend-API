@@ -1,6 +1,7 @@
 import re
 
 from scraper_utils import absolute_url, fetch_soup, BASE_URL
+from stream_resolver import resolve_direct_stream, resolve_zephyrix_stream
 
 
 def get_episode_data(slug: str):
@@ -15,12 +16,18 @@ def get_episode_data(slug: str):
     for video in soup.select("aside.video-player div.video"):
         iframe = video.find("iframe")
         if iframe:
-            servers.append({
+            server = {
                 "server_id": video.get("id"),
                 "server_name": labels.get(video.get("id"), video.get("id")),
                 "audio": "Multi-Audio",
                 "embed_url": absolute_url(iframe.get("src") or iframe.get("data-src")),
-            })
+            }
+            if server["embed_url"]:
+                if "play.zephyrix.org" in server["embed_url"]:
+                    server.update(resolve_zephyrix_stream(server["embed_url"], episode_url))
+                else:
+                    server.update(resolve_direct_stream(server["embed_url"]))
+            servers.append(server)
     tracking = soup.find(string=re.compile(r"addToWatchHistory"))
     metadata = {}
     if tracking:

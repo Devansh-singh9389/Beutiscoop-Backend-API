@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Beutiscoop - discover movies, series, anime and cartoons.">
+  <title>Beutiscoop</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="site-header">
+    <a class="brand" href="#/">BEUTI<span>SCOOP</span></a>
+    <nav aria-label="Main navigation">
+      <a href="#/">Home</a>
+      <a href="#/movies">Movies</a>
+      <a href="#/series">Series</a>
+      <a href="#/category/cartoon">Cartoon</a>
+      <a href="#/category/anime">Anime</a>
+    </nav>
+    <form id="search-form" class="search">
+      <input id="search-input" type="search" placeholder="Search titles..." aria-label="Search titles">
+      <button aria-label="Search">⌕</button>
+    </form>
+  </header>
+  <main id="app" class="container">
+    <div class="loading"><span></span><span></span><span></span> Loading your watchlist...</div>
+  </main>
+  <footer>Beutiscoop <span>•</span> Find something great to watch</footer>
+  <script src="app.js"></script>
+</body>
+</html>

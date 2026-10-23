@@ -4,3 +4,4 @@ fastapi
 uvicorn
 cloudscraper
 python-dotenv
+yt-dlp

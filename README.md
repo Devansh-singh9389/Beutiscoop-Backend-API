@@ -43,6 +43,20 @@ shared publicly, revoke it in ScraperAPI and create a replacement.
 python -m uvicorn api:app --host 127.0.0.1 --port 8000 --reload
 ```
 
+To enable direct HLS/MP4 resolution, set the resolver variables in the same
+PowerShell session before starting Uvicorn. The embed host must be explicitly
+authorized; for the `MultiCloud2` server shown by the episode endpoint:
+
+```powershell
+$env:RESOLVE_DIRECT_STREAMS = "true"
+$env:DIRECT_STREAM_ALLOWED_HOSTS = "bysewihe.com"
+python -m uvicorn api:app --host 127.0.0.1 --port 8000 --reload
+```
+
+If Uvicorn is already running, stop and restart it after changing these
+variables. Do not add a host unless you are authorized to access and resolve
+its streams.
+
 The API base URL is:
 
 ```text
@@ -245,6 +259,58 @@ The response contains the available player servers:
 
 The frontend should display each `embed_url` in an iframe. It should not fetch
 the upstream website directly.
+
+### Optional direct stream resolution
+
+The API can optionally resolve one direct HLS or MP4 URL for an authorized
+source using `yt-dlp`. This is disabled by default and does not change the
+existing `embed_url` response or frontend behavior.
+
+Only enable it for sources you own or are explicitly authorized to access. The
+resolver does not bypass anti-bot, anti-debugging, authentication, DRM, or
+other provider access controls. Configure an explicit host allowlist:
+
+```powershell
+$env:RESOLVE_DIRECT_STREAMS = "true"
+$env:DIRECT_STREAM_ALLOWED_HOSTS = "media.example.com,player.example.com"
+```
+
+When enabled, episode servers may additionally contain:
+
+```json
+{
+  "direct_stream_url": "https://media.example.com/video.m3u8",
+  "direct_stream_type": "hls"
+}
+```
+
+If the source does not provide a direct stream, the response includes
+`direct_stream_error` and keeps the existing `embed_url`. The resolver is
+bounded to one URL and does not crawl playlists.
+
+Movie responses also include a single top-level `vlc_url` when a direct stream
+is available:
+
+```text
+GET /api/movie/your-authorized-movie-slug
+```
+
+Open that `vlc_url` in VLC using **Media > Open Network Stream**. If it is
+`null`, the source only supplied a browser player or a protected redirect; VLC
+cannot play that page directly.
+
+## Run the frontend
+
+Start the API first, then serve the static files from the `frontend` folder
+using Python's built-in static server:
+
+```powershell
+cd C:\Code\beutiscoop\frontend
+python -m http.server 5500
+```
+
+Open `http://127.0.0.1:5500` in your browser. The frontend calls the API at
+`http://127.0.0.1:8000`, so both the API and frontend servers must be running.
 
 ### Category details
 
