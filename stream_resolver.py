@@ -1,23 +1,83 @@
 import logging
 import os
 import re
+import time
+import json
 from urllib.parse import urlparse
-
 import requests
 
+from playwright.sync_api import sync_playwright
+from playwright_stealth import Stealth 
 
 logger = logging.getLogger("beutiscoop.stream_resolver")
-
 
 class StreamResolutionError(RuntimeError):
     pass
 
+# --- PERSISTENT CACHE SETUP ---
+CACHE_DIR = "cache"
+CACHE_FILE = os.path.join(CACHE_DIR, "stream_cache.json")
+CACHE_TTL = 7200  # 2 hours in seconds
+
+_stream_cache = {}
+
+def _load_cache():
+    """Load the cache from the JSON file on startup."""
+    global _stream_cache
+    if not os.path.exists(CACHE_DIR):
+        os.makedirs(CACHE_DIR)
+    
+    if os.path.exists(CACHE_FILE):
+        try:
+            with open(CACHE_FILE, "r") as f:
+                _stream_cache = json.load(f)
+        except (json.JSONDecodeError, IOError) as exc:
+            logger.warning("Failed to load cache file, starting fresh: %s", exc)
+            _stream_cache = {}
+
+def _save_cache():
+    """Save the cache to the JSON file, purging expired entries first."""
+    current_time = time.time()
+    
+    # Remove expired items to prevent the JSON file from growing endlessly
+    expired_keys = [
+        url for url, data in _stream_cache.items() 
+        if current_time - data.get("timestamp", 0) >= CACHE_TTL
+    ]
+    for key in expired_keys:
+        del _stream_cache[key]
+        
+    try:
+        if not os.path.exists(CACHE_DIR):
+            os.makedirs(CACHE_DIR)
+        with open(CACHE_FILE, "w") as f:
+            json.dump(_stream_cache, f, indent=4)
+    except IOError as exc:
+        logger.warning("Failed to save cache file: %s", exc)
+
+# Initialize cache into memory when this module is imported
+_load_cache()
+
+def get_cached_stream(url: str) -> dict | None:
+    if url in _stream_cache:
+        data = _stream_cache[url]
+        timestamp = data.get("timestamp", 0)
+        if time.time() - timestamp < CACHE_TTL:
+            return data.get("result")
+    return None
+
+def set_cached_stream(url: str, result: dict):
+    _stream_cache[url] = {
+        "result": result,
+        "timestamp": time.time()
+    }
+    _save_cache()
+# ------------------------------
 
 def _enabled() -> bool:
     return os.getenv("RESOLVE_DIRECT_STREAMS", "").strip().lower() in {
         "1", "true", "yes", "on"
     }
-
 
 def _allowed_hosts() -> set[str]:
     return {
@@ -26,7 +86,6 @@ def _allowed_hosts() -> set[str]:
         if host.strip()
     }
 
-
 def _validate_url(url: str) -> tuple[bool, str | None]:
     parsed = urlparse(url)
     if parsed.scheme not in {"http", "https"} or not parsed.hostname:
@@ -34,7 +93,6 @@ def _validate_url(url: str) -> tuple[bool, str | None]:
     if parsed.hostname.lower() not in _allowed_hosts():
         return False, "The embed host is not in DIRECT_STREAM_ALLOWED_HOSTS"
     return True, None
-
 
 def _extract_info(url: str) -> dict:
     try:
@@ -56,7 +114,6 @@ def _extract_info(url: str) -> dict:
     except yt_dlp.utils.DownloadError as exc:
         raise StreamResolutionError(str(exc)) from exc
 
-
 def _direct_format(info: dict) -> tuple[str, str] | None:
     formats = info.get("formats") or []
     candidates = [info, *formats]
@@ -72,7 +129,6 @@ def _direct_format(info: dict) -> tuple[str, str] | None:
             return direct_url, "mp4"
     return None
 
-
 _ZEPHYRIX_STREAM_PATTERN = re.compile(
     r'https?://[^\s"\'<>]+(?:\.m3u8|\.mp4|master\.txt)[^\s"\'<>]*',
     re.IGNORECASE,
@@ -86,7 +142,6 @@ _ZEPHYRIX_HEADERS = {
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
     "Accept-Language": "en-US,en;q=0.9",
 }
-
 
 def _unpack_dean_edwards(packed_js: str) -> str:
     pattern = r"\}\('(.*)',\s*(\d+),\s*(\d+),\s*'([^']*)'\.split\('\|'\)"
@@ -116,7 +171,6 @@ def _unpack_dean_edwards(packed_js: str) -> str:
         "\\/", "/"
     )
 
-
 def _zephyrix_result(url: str) -> dict | None:
     stream_match = _ZEPHYRIX_STREAM_PATTERN.search(url)
     if not stream_match:
@@ -131,9 +185,7 @@ def _zephyrix_result(url: str) -> dict | None:
         ),
     }
 
-
 def resolve_zephyrix_stream(embed_url: str, parent_url: str) -> dict:
-    """Resolve a direct stream from a play.zephyrix.org embed."""
     if urlparse(embed_url).hostname != "play.zephyrix.org":
         return {"direct_stream_error": "The embed URL is not a Play Zephyrix URL"}
 
@@ -185,31 +237,122 @@ def resolve_zephyrix_stream(embed_url: str, parent_url: str) -> dict:
     return {"direct_stream_error": "Could not extract direct stream link from Zephyrix"}
 
 
+def _playwright_fallback(embed_url: str) -> dict | None:
+    start_time = time.time()
+    logger.info("Starting Playwright fallback for: %s", embed_url)
+    
+    try:
+        with Stealth().use_sync(sync_playwright()) as p:
+            browser = p.chromium.launch(
+                headless=False,
+                args=[
+                    "--window-position=-32000,-32000",
+                    "--mute-audio",
+                    "--autoplay-policy=no-user-gesture-required"
+                ]
+            )
+            
+            context = browser.new_context(
+                user_agent=_ZEPHYRIX_HEADERS["User-Agent"],
+                extra_http_headers={"Referer": "https://watchanimeworld.one/"}
+            )
+            
+            main_page = context.new_page()
+            
+            def close_popups(new_page):
+                if new_page != main_page:
+                    logger.debug("[!] Blocked a popup tab.")
+                    new_page.close()
+                    
+            context.on("page", close_popups)
+            
+            found_m3u8 = {"value": None}
+
+            def intercept_request(request):
+                if "master.m3u8" in request.url and not found_m3u8["value"]:
+                    logger.info("[+] Master .m3u8 Link Found Automatically!")
+                    found_m3u8["value"] = request.url
+                    
+            main_page.on("request", intercept_request)
+            main_page.goto(embed_url)
+            main_page.wait_for_timeout(4000) 
+            
+            viewport = main_page.viewport_size
+            center_x = viewport['width'] / 2 if viewport else 400
+            center_y = viewport['height'] / 2 if viewport else 300
+            
+            logger.info("Bypassing ad overlays and 'verify human' checks...")
+            
+            for i in range(6):
+                if found_m3u8["value"]:
+                    break
+                logger.debug(f"[*] Simulating click {i+1} at center...")
+                main_page.mouse.click(x=center_x, y=center_y)
+                main_page.wait_for_timeout(2000) 
+                
+            for _ in range(10):
+                if found_m3u8["value"]:
+                    break
+                main_page.wait_for_timeout(1000)
+                
+            browser.close()
+            
+            execution_time = time.time() - start_time
+            logger.info(f"Playwright fallback execution time: {execution_time:.2f} seconds")
+
+            if found_m3u8["value"]:
+                return {
+                    "direct_stream_url": found_m3u8["value"],
+                    "direct_stream_type": "hls"
+                }
+    except Exception as exc:
+        logger.error("Playwright fallback error: %s", exc)
+        
+    return None
+
+
 def resolve_direct_stream(embed_url: str) -> dict:
-    """Resolve one authorized direct stream URL, or return an explicit failure."""
     if not _enabled():
         return {}
+        
     valid, validation_error = _validate_url(embed_url)
     if not valid:
         return {"direct_stream_error": validation_error}
 
+    # 1. Check Cache
+    cached_result = get_cached_stream(embed_url)
+    if cached_result:
+        logger.info("Serving direct stream from JSON cache for: %s", embed_url)
+        return cached_result
+
+    # 2. Try yt-dlp first
+    result = None
     try:
         result = _direct_format(_extract_info(embed_url))
     except (OSError, StreamResolutionError, ValueError) as exc:
         logger.warning("Direct stream resolution failed for %s: %s", embed_url, exc)
-        return {"direct_stream_error": "The authorized source did not provide a direct stream"}
-
+    
+    # 3. If yt-dlp fails, ONLY trigger Playwright fallback for bysewihe.com
     if not result:
-        return {"direct_stream_error": "No direct HLS or MP4 stream was provided"}
+        parsed = urlparse(embed_url)
+        if parsed.hostname and "bysewihe.com" in parsed.hostname:
+            fallback_result = _playwright_fallback(embed_url)
+            if fallback_result:
+                set_cached_stream(embed_url, fallback_result)
+                return fallback_result
+        return {"direct_stream_error": "The authorized source did not provide a direct stream"}
+        
+    # 4. Return and Cache yt-dlp result
     direct_url, stream_type = result
-    return {
+    final_result = {
         "direct_stream_url": direct_url,
         "direct_stream_type": stream_type,
     }
+    set_cached_stream(embed_url, final_result)
+    return final_result
 
 
 def resolve_first_direct_stream(urls: list[str]) -> dict:
-    """Return the first direct stream from an authorized list of source URLs."""
     for url in urls:
         result = resolve_direct_stream(url)
         if result.get("direct_stream_url"):

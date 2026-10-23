@@ -1,4 +1,5 @@
 import requests
+import time
 from bs4 import BeautifulSoup
 from playwright.sync_api import sync_playwright
 from playwright_stealth import Stealth 
@@ -8,6 +9,7 @@ headers = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
 }
 
+start_time = time.time()
 response = requests.get(url, headers=headers)
 soup = BeautifulSoup(response.text, 'html.parser')
 
@@ -16,11 +18,9 @@ if iframe:
     embed_url = iframe.get('src') or iframe.get('data-src')
     print(f"Found Player URL: {embed_url}")
 
-    print("Launching hidden off-screen browser...")
+    print("Launching 'Brave-Style' off-screen browser...")
     
     with Stealth().use_sync(sync_playwright()) as p:
-        # Run headless=False, but push the window completely off the monitor
-        # Mute audio and allow autoplay so the video starts smoothly
         browser = p.chromium.launch(
             headless=False,
             args=[
@@ -35,6 +35,14 @@ if iframe:
             extra_http_headers={"Referer": "https://watchanimeworld.one/"}
         )
         
+        # BRAVE REPLICA: Block common ad and popup domains at the network level
+        ad_domains = [
+            "*popads*", "*popunder*", "*propellerads*", "*adsterra*", 
+            "*onclick*", "*exoclick*", "*doubleclick*", "*googleadservices*"
+        ]
+        for domain in ad_domains:
+            context.route(domain, lambda route: route.abort())
+        
         main_page = context.new_page()
         
         def close_popups(new_page):
@@ -48,12 +56,29 @@ if iframe:
 
         def intercept_request(request):
             if "master.m3u8" in request.url and not found_m3u8["value"]:
-                print(f"\n[+] Master .m3u8 Link Found Automatically!\n{request.url}\n")
+                print(f"\n[+] Master .m3u8 Link Found!\n{request.url}\n")
                 found_m3u8["value"] = True
                 
         main_page.on("request", intercept_request)
-        main_page.goto(embed_url)
-        main_page.wait_for_timeout(4000) 
+        
+        # Wait for the DOM
+        main_page.goto(embed_url, wait_until="domcontentloaded")
+        main_page.wait_for_timeout(2000) 
+        
+        # BRAVE REPLICA: Strip out all invisible overlays/iframes layered over the player
+        print("Stripping ad overlays from the DOM...")
+        main_page.evaluate("""
+            () => {
+                const elements = document.querySelectorAll('*');
+                elements.forEach(el => {
+                    const zIndex = window.getComputedStyle(el).zIndex;
+                    // If an element is covering the screen with a massive z-index, delete it
+                    if (zIndex !== 'auto' && parseInt(zIndex) > 1000) {
+                        el.remove();
+                    }
+                });
+            }
+        """)
         
         viewport = main_page.viewport_size
         if viewport:
@@ -62,9 +87,10 @@ if iframe:
         else:
             center_x, center_y = 400, 300
             
-        print("Bypassing ad overlays and 'verify human' checks...")
+        print("Attempting to play video directly...")
         
-        for i in range(6):
+        # Because we deleted the shields, we should theoretically only need a few clicks
+        for i in range(5):
             if found_m3u8["value"]:
                 break
             print(f"[*] Simulating click {i+1} at center...")
@@ -77,5 +103,7 @@ if iframe:
             main_page.wait_for_timeout(1000)
             
         browser.close()
+        
+    print(f"Total execution time: {time.time() - start_time:.2f} seconds")
 else:
     print("Could not find the iframe.")
